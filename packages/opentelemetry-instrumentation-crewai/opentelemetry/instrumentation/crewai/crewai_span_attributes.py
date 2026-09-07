@@ -12,6 +12,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.semconv_ai import SpanAttributes
 import json
 
+# Crew fields that are safe to stringify. Anything else -- LLM clients, the
+# embedder config, memory handles -- can carry credentials in its repr.
+CREW_FIELDS = ("id", "name", "process", "verbose", "memory", "cache", "planning",
+               "max_rpm", "share_crew")
+
 
 def set_span_attribute(span: Span, name, value):
     if value is not None:
@@ -97,27 +102,22 @@ class CrewAISpanAttributes:
                 self._set_attribute(SpanAttributes.GEN_AI_REQUEST_MAX_COMPLETION_TOKENS, value)
 
     def _populate_crew_attributes(self):
-        for key, value in self.instance.__dict__.items():
-            if value is None:
-                continue
-            if key == "tasks":
-                self._parse_tasks(value)
-            elif key == "agents":
-                self._parse_agents(value)
-            else:
+        for key in CREW_FIELDS:
+            value = getattr(self.instance, key, None)
+            if value is not None:
                 self.crew[key] = str(value)
+        self._parse_tasks(self.instance.tasks or [])
+        self._parse_agents(self.instance.agents or [])
 
     def _populate_agent_attributes(self):
-        return self._extract_attributes(self.instance)
+        return self._stringify(self._extract_agent_data(self.instance))
 
     def _populate_task_attributes(self):
-        task_data = self._extract_attributes(self.instance)
-        if "agent" in task_data:
-            task_data["agent"] = self.instance.agent.role if self.instance.agent else None
-        return task_data
+        return self._stringify(self._extract_task_data(self.instance))
 
-    def _populate_llm_attributes(self):
-        return self._extract_attributes(self.instance)
+    @staticmethod
+    def _stringify(data):
+        return {key: str(value) for key, value in data.items() if value is not None}
 
     def _parse_agents(self, agents):
         self.crew["agents"] = [
@@ -125,18 +125,19 @@ class CrewAISpanAttributes:
         ]
 
     def _parse_tasks(self, tasks):
-        self.crew["tasks"] = [
-            {
-                "agent": task.agent.role if task.agent else None,
-                "description": task.description,
-                "async_execution": task.async_execution,
-                "expected_output": task.expected_output,
-                "human_input": task.human_input,
-                "tools": task.tools,
-                "output_file": task.output_file,
-            }
-            for task in tasks
-        ]
+        self.crew["tasks"] = [self._extract_task_data(task) for task in tasks if task is not None]
+
+    def _extract_task_data(self, task):
+        return {
+            "id": str(task.id),
+            "agent": task.agent.role if task.agent else None,
+            "description": task.description,
+            "async_execution": task.async_execution,
+            "expected_output": task.expected_output,
+            "human_input": task.human_input,
+            "tools": self._serialize_tools(task.tools or []),
+            "output_file": task.output_file,
+        }
 
     def _extract_agent_data(self, agent):
         model = (
@@ -151,23 +152,11 @@ class CrewAISpanAttributes:
             "goal": agent.goal,
             "backstory": agent.backstory,
             "cache": agent.cache,
-            "config": agent.config,
             "verbose": agent.verbose,
             "allow_delegation": agent.allow_delegation,
-            "tools": agent.tools,
+            "tools": self._serialize_tools(agent.tools or []),
             "max_iter": agent.max_iter,
             "llm": str(model), }
-
-    def _extract_attributes(self, obj):
-        attributes = {}
-        for key, value in obj.__dict__.items():
-            if value is None:
-                continue
-            if key == "tools":
-                attributes[key] = self._serialize_tools(value)
-            else:
-                attributes[key] = str(value)
-        return attributes
 
     def _serialize_tools(self, tools):
         return json.dumps(
