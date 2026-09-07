@@ -102,6 +102,7 @@ class CrewAISpanAttributes:
                 self._set_attribute(SpanAttributes.GEN_AI_REQUEST_MAX_COMPLETION_TOKENS, value)
 
     def _populate_crew_attributes(self):
+        """Collect the allowlisted Crew fields, plus its tasks and agents."""
         for key in CREW_FIELDS:
             value = getattr(self.instance, key, None)
             if value is not None:
@@ -110,13 +111,16 @@ class CrewAISpanAttributes:
         self._parse_agents(self.instance.agents or [])
 
     def _populate_agent_attributes(self):
+        """Collect the allowlisted Agent fields for a standalone agent span."""
         return self._stringify(self._extract_agent_data(self.instance))
 
     def _populate_task_attributes(self):
+        """Collect the allowlisted Task fields for a standalone task span."""
         return self._stringify(self._extract_task_data(self.instance))
 
     @staticmethod
     def _stringify(data):
+        """Render a field dict as span-attribute values, dropping the unset ones."""
         return {key: str(value) for key, value in data.items() if value is not None}
 
     def _parse_agents(self, agents):
@@ -125,9 +129,11 @@ class CrewAISpanAttributes:
         ]
 
     def _parse_tasks(self, tasks):
+        """Attach the crew's tasks, each reduced to its allowlisted fields."""
         self.crew["tasks"] = [self._extract_task_data(task) for task in tasks if task is not None]
 
     def _extract_task_data(self, task):
+        """Return the allowlisted Task fields, with the agent named by its role."""
         return {
             "id": str(task.id),
             "agent": task.agent.role if task.agent else None,
@@ -140,6 +146,7 @@ class CrewAISpanAttributes:
         }
 
     def _extract_agent_data(self, agent):
+        """Return the allowlisted Agent fields, with the LLM named by its model."""
         model = (
             getattr(agent.llm, "model", None)
             or getattr(agent.llm, "model_name", None)

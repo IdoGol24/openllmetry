@@ -21,14 +21,18 @@ SENTINEL = "SENTINEL-NOT-A-KEY-9f3a"
 
 
 class EchoTool(BaseTool):
+    """A tool with nothing secret on it, so any leak in the span is the LLM's."""
+
     name: str = "echo"
     description: str = "Echoes the input back."
 
     def _run(self, text: str = "") -> str:
+        """Echo the input back; never called, the tool is only ever serialized."""
         return text
 
 
 def build_agent():
+    """An Agent holding a credential on both its LLM and its embedder config."""
     return Agent(
         role="researcher",
         goal="find things",
@@ -40,11 +44,13 @@ def build_agent():
 
 
 def build_task():
+    """A Task whose agent holds the credential."""
     return Task(description="a fixed description", expected_output="a fixed output",
                 agent=build_agent(), tools=[EchoTool()])
 
 
 def build_crew():
+    """A Crew holding a credential on its manager LLM and its embedder config."""
     agent = build_agent()
     return Crew(
         agents=[agent],
@@ -59,6 +65,7 @@ BUILDERS = {"Agent": build_agent, "Task": build_task, "Crew": build_crew}
 
 
 def span_attributes(instance):
+    """Return the attributes the instrumentation lands on a span for `instance`."""
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -69,6 +76,7 @@ def span_attributes(instance):
 
 @pytest.mark.parametrize("kind", list(BUILDERS))
 def test_configured_credentials_never_reach_the_span(kind):
+    """Nothing configured on an LLM or embedder is stringified onto the span."""
     attrs = span_attributes(BUILDERS[kind]())
 
     # Substring check: nested agents, tasks and tools are JSON-dumped into a
