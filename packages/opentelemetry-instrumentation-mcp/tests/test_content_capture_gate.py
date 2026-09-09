@@ -31,6 +31,7 @@ def _all_attribute_text(span_exporter) -> str:
 
 
 def _server() -> FastMCP:
+    """Build a server with one tool that echoes a caller-supplied token."""
     server = FastMCP("content-gate-server")
 
     @server.tool()
@@ -44,6 +45,7 @@ def _server() -> FastMCP:
 async def test_tool_arguments_suppressed_when_content_capture_off(
     span_exporter, monkeypatch
 ) -> None:
+    """With the switch off, tool arguments must not appear on any span."""
     monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "false")
 
     async with Client(_server()) as client:
@@ -56,6 +58,7 @@ async def test_tool_arguments_suppressed_when_content_capture_off(
 async def test_tool_arguments_captured_when_content_capture_on(
     span_exporter, monkeypatch
 ) -> None:
+    """With the switch on, tool arguments are still recorded as before."""
     monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "true")
 
     async with Client(_server()) as client:
@@ -80,6 +83,7 @@ async def test_non_tool_response_body_suppressed_when_content_capture_off(
 
     @server.tool(description=f"A tool whose description carries {MARKER}.")
     async def documented(arg: str) -> str:
+        """A tool that exists only to carry the marker in its description."""
         return arg
 
     async with Client(server) as client:

@@ -16,6 +16,7 @@ class FastMCPInstrumentor:
     """Handles FastMCP-specific instrumentation logic."""
 
     def __init__(self):
+        """Create the instrumentor with no tracer or server name bound yet."""
         self._tracer = None
         self._server_name = None
 
@@ -50,6 +51,7 @@ class FastMCPInstrumentor:
         @dont_throw
         def traced_method(wrapped, instance, args, kwargs):
             # Call the original __init__ first
+            """Record the server name from FastMCP's constructor arguments."""
             result = wrapped(*args, **kwargs)
 
             if args and len(args) > 0:
@@ -63,6 +65,7 @@ class FastMCPInstrumentor:
     def _fastmcp_tool_wrapper(self):
         """Create wrapper for FastMCP tool execution."""
         async def traced_method(wrapped, instance, args, kwargs):
+            """Wrap a FastMCP tool call in server and tool spans."""
             if not self._tracer:
                 return await wrapped(*args, **kwargs)
 

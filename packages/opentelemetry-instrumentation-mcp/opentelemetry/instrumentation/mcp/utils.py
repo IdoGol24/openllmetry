@@ -7,6 +7,7 @@ import traceback
 
 
 class Config:
+    """Module-level configuration for the MCP instrumentation."""
     exception_logger = None
 
 
@@ -29,18 +30,21 @@ def dont_throw(func):
     logger = logging.getLogger(func.__module__)
 
     async def async_wrapper(*args, **kwargs):
+        """Await the wrapped coroutine, logging instead of raising on failure."""
         try:
             return await func(*args, **kwargs)
         except Exception as e:
             _handle_exception(e, func, logger)
 
     def sync_wrapper(*args, **kwargs):
+        """Call the wrapped function, logging instead of raising on failure."""
         try:
             return func(*args, **kwargs)
         except Exception as e:
             _handle_exception(e, func, logger)
 
     def _handle_exception(e, func, logger):
+        """Log a tracing failure and hand it to the configured exception logger."""
         logger.debug(
             "OpenLLMetry failed to trace in %s, error: %s",
             func.__name__,

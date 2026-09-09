@@ -28,15 +28,19 @@ _instruments = ("mcp >= 1.6.0",)
 
 
 class McpInstrumentor(BaseInstrumentor):
+    """Instrument the MCP client, server and transports with OpenTelemetry spans."""
     def __init__(self, exception_logger=None):
+        """Store the exception logger and build the FastMCP sub-instrumentor."""
         super().__init__()
         Config.exception_logger = exception_logger
         self._fastmcp_instrumentor = FastMCPInstrumentor()
 
     def instrumentation_dependencies(self) -> Collection[str]:
+        """Return the package versions this instrumentation supports."""
         return _instruments
 
     def _instrument(self, **kwargs):
+        """Wrap the MCP client, server sessions and every supported transport."""
         tracer_provider = kwargs.get("tracer_provider")
         tracer = get_tracer(__name__, __version__, tracer_provider)
 
@@ -118,11 +122,13 @@ class McpInstrumentor(BaseInstrumentor):
         )
 
     def _uninstrument(self, **kwargs):
+        """Unwrap the transports this instrumentation replaced."""
         unwrap("mcp.client.stdio", "stdio_client")
         unwrap("mcp.server.stdio", "stdio_server")
         self._fastmcp_instrumentor.uninstrument()
 
     def _transport_wrapper(self, tracer):
+        """Wrap a transport so its read and write streams are instrumented."""
         @asynccontextmanager
         async def traced_method(
             wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any
@@ -133,6 +139,7 @@ class McpInstrumentor(BaseInstrumentor):
             ],
             None,
         ]:
+            """Yield the transport's streams wrapped in instrumented proxies."""
             async with wrapped(*args, **kwargs) as result:
                 try:
                     read_stream, write_stream = result
@@ -161,9 +168,11 @@ class McpInstrumentor(BaseInstrumentor):
         return traced_method
 
     def _base_session_init_wrapper(self, tracer):
+        """Wrap a server session's incoming message streams to carry trace context."""
         def traced_method(
             wrapped: Callable[..., None], instance: Any, args: Any, kwargs: Any
         ) -> None:
+            """Replace the session's incoming stream pair with context-propagating proxies."""
             wrapped(*args, **kwargs)
             reader = getattr(instance, "_incoming_message_stream_reader", None)
             writer = getattr(instance, "_incoming_message_stream_writer", None)
@@ -182,8 +191,10 @@ class McpInstrumentor(BaseInstrumentor):
         return traced_method
 
     def patch_mcp_client(self, tracer: Tracer):
+        """Wrap BaseSession.send_request so each MCP request becomes a span."""
         @dont_throw
         async def traced_method(wrapped, instance, args, kwargs):
+            """Start a span for the outgoing request and inject trace context into its meta."""
             meta = None
             method = None
             params = None
@@ -220,6 +231,7 @@ class McpInstrumentor(BaseInstrumentor):
         @dont_throw
         async def traced_method(wrapped, instance, args, kwargs):
             # Start a root span for the MCP client session and make it current
+            """Wrap a FastMCP client session enter to open a session span."""
             span_context_manager = tracer.start_as_current_span("mcp.client.session")
             span = span_context_manager.__enter__()
             span.set_attribute(SpanAttributes.TRACELOOP_SPAN_KIND, "session")
@@ -247,6 +259,7 @@ class McpInstrumentor(BaseInstrumentor):
 
         @dont_throw
         async def traced_method(wrapped, instance, args, kwargs):
+            """Close the session span when the FastMCP client exits."""
             try:
                 # Call the original method first
                 result = await wrapped(*args, **kwargs)
@@ -472,6 +485,7 @@ def serialize(request, depth=0, max_depth=4):
     depth += 1
 
     def is_serializable(request):
+        """Return whether a value can be JSON-encoded without a fallback."""
         try:
             json.dumps(request)
             return True
@@ -507,18 +521,23 @@ def serialize(request, depth=0, max_depth=4):
 
 class InstrumentedStreamReader(ObjectProxy):  # type: ignore
     # ObjectProxy missing context manager - https://github.com/GrahamDumpleton/wrapt/issues/73
+    """Stream reader proxy that extracts trace context from incoming messages."""
     def __init__(self, wrapped, tracer):
+        """Wrap a stream reader and keep the tracer used for its spans."""
         super().__init__(wrapped)
         self._tracer = tracer
 
     async def __aenter__(self) -> Any:
+        """Enter the wrapped stream reader."""
         return await self.__wrapped__.__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
+        """Exit the wrapped stream reader."""
         return await self.__wrapped__.__aexit__(exc_type, exc_value, traceback)
 
     @dont_throw
     async def __aiter__(self) -> AsyncGenerator[Any, None]:
+        """Iterate the wrapped reader, restoring trace context from each message."""
         from mcp.types import JSONRPCMessage, JSONRPCRequest
 
         async for item in self.__wrapped__:
@@ -553,18 +572,23 @@ class InstrumentedStreamReader(ObjectProxy):  # type: ignore
 
 class InstrumentedStreamWriter(ObjectProxy):  # type: ignore
     # ObjectProxy missing context manager - https://github.com/GrahamDumpleton/wrapt/issues/73
+    """Stream writer proxy that records outgoing responses on a span."""
     def __init__(self, wrapped, tracer):
+        """Wrap a stream writer and keep the tracer used for its spans."""
         super().__init__(wrapped)
         self._tracer = tracer
 
     async def __aenter__(self) -> Any:
+        """Enter the wrapped stream writer."""
         return await self.__wrapped__.__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
+        """Exit the wrapped stream writer."""
         return await self.__wrapped__.__aexit__(exc_type, exc_value, traceback)
 
     @dont_throw
     async def send(self, item: Any) -> Any:
+        """Record the outgoing response on a span and forward it to the wrapped stream."""
         from mcp.types import JSONRPCMessage, JSONRPCRequest
 
         # Handle different item types based on what's available
@@ -611,42 +635,53 @@ class InstrumentedStreamWriter(ObjectProxy):  # type: ignore
 
 @dataclass(slots=True, frozen=True)
 class ItemWithContext:
+    """A stream item paired with the OpenTelemetry context it was written under."""
     item: Any
     ctx: context.Context
 
 
 class ContextSavingStreamWriter(ObjectProxy):  # type: ignore
     # ObjectProxy missing context manager - https://github.com/GrahamDumpleton/wrapt/issues/73
+    """Stream writer proxy that attaches the current context to each item."""
     def __init__(self, wrapped, tracer):
+        """Wrap a stream writer and keep the tracer used for its spans."""
         super().__init__(wrapped)
         self._tracer = tracer
 
     async def __aenter__(self) -> Any:
+        """Enter the wrapped stream writer."""
         return await self.__wrapped__.__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
+        """Exit the wrapped stream writer."""
         return await self.__wrapped__.__aexit__(exc_type, exc_value, traceback)
 
     @dont_throw
     async def send(self, item: Any) -> Any:
         # Removed RequestStreamWriter span creation - we don't need low-level protocol spans
+        """Forward the item together with the context it was sent under."""
         ctx = context.get_current()
         return await self.__wrapped__.send(ItemWithContext(item, ctx))
 
 
 class ContextAttachingStreamReader(ObjectProxy):  # type: ignore
     # ObjectProxy missing context manager - https://github.com/GrahamDumpleton/wrapt/issues/73
+    """Stream reader proxy that restores each item's saved context while it is handled."""
     def __init__(self, wrapped, tracer):
+        """Wrap a stream reader and keep the tracer used for its spans."""
         super().__init__(wrapped)
         self._tracer = tracer
 
     async def __aenter__(self) -> Any:
+        """Enter the wrapped stream reader."""
         return await self.__wrapped__.__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
+        """Exit the wrapped stream reader."""
         return await self.__wrapped__.__aexit__(exc_type, exc_value, traceback)
 
     async def __aiter__(self) -> AsyncGenerator[Any, None]:
+        """Yield each item with its saved context attached, detaching it afterwards."""
         async for item in self.__wrapped__:
             item_with_context = cast(ItemWithContext, item)
             restore = context.attach(item_with_context.ctx)
