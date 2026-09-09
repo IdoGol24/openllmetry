@@ -106,16 +106,38 @@ def _extract_class_name_from_serialized(serialized: Optional[dict[str, Any]]) ->
         return ""
 
 
+_METADATA_PRIMITIVES = (bool, str, bytes, int, float)
+
+
 def _sanitize_metadata_value(value: Any) -> Any:
-    """Convert metadata values to OpenTelemetry-compatible types."""
+    """Convert metadata values to OpenTelemetry-compatible types.
+
+    Only plain data is forwarded. An arbitrary object is dropped rather than
+    stringified: ``str()`` on a model, client or config object renders its
+    constructor state, which routinely includes credentials the caller never
+    meant to export. Association properties are also copied onto every
+    descendant span, so a single such value spreads across the whole trace.
+
+    Returns ``None`` for anything that is not plain data; callers drop those
+    keys rather than recording a placeholder.
+    """
     if value is None:
         return None
-    if isinstance(value, (bool, str, bytes, int, float)):
+    if isinstance(value, _METADATA_PRIMITIVES):
         return value
     if isinstance(value, (list, tuple)):
-        return [str(_sanitize_metadata_value(v)) for v in value]
-    # Convert other types to strings
-    return str(value)
+        # Keep primitive elements, drop object elements, preserving the
+        # existing "sequence of strings" attribute shape.
+        return [str(v) for v in value if isinstance(v, _METADATA_PRIMITIVES)]
+    if isinstance(value, dict):
+        # A mapping of plain data is legitimate metadata, so keep it as JSON.
+        # json.dumps has no ``default``, so a mapping holding a non-serializable
+        # object raises and the key is dropped instead of being stringified.
+        try:
+            return json.dumps(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def valid_role(role: str) -> bool:
@@ -296,11 +318,14 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             current_association_properties = (
                 context_api.get_value("association_properties") or {}
             )
-            # Sanitize metadata values to ensure they're compatible with OpenTelemetry
+            # Sanitize metadata values to ensure they're compatible with
+            # OpenTelemetry. Values that are not plain data sanitize to None
+            # and are dropped.
             sanitized_metadata = {
-                k: _sanitize_metadata_value(v)
+                k: sanitized
                 for k, v in metadata.items()
                 if v is not None
+                and (sanitized := _sanitize_metadata_value(v)) is not None
             }
             try:
                 association_properties_token = context_api.attach(
