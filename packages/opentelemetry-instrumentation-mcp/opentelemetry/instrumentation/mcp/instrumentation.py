@@ -15,7 +15,11 @@ from opentelemetry.semconv_ai import SpanAttributes, TraceloopSpanKindValues
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 
 from opentelemetry.instrumentation.mcp.version import __version__
-from opentelemetry.instrumentation.mcp.utils import dont_throw, Config
+from opentelemetry.instrumentation.mcp.utils import (
+    Config,
+    dont_throw,
+    should_send_prompts,
+)
 from opentelemetry.instrumentation.mcp.fastmcp_instrumentation import (
     FastMCPInstrumentor,
 )
@@ -289,8 +293,13 @@ class McpInstrumentor(BaseInstrumentor):
             )
             span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_NAME, entity_name)
 
-            # Add input
-            clean_input = self._extract_clean_input(method, params)
+            # Add input. Tool arguments are request content, so they are
+            # recorded only when content capture is enabled.
+            clean_input = (
+                self._extract_clean_input(method, params)
+                if should_send_prompts()
+                else None
+            )
             if clean_input:
                 try:
                     span.set_attribute(
@@ -308,9 +317,12 @@ class McpInstrumentor(BaseInstrumentor):
     async def _handle_mcp_method(self, tracer, method, args, kwargs, wrapped):
         """Handle non-tool MCP methods with simple serialization"""
         with tracer.start_as_current_span(f"{method}.mcp") as span:
-            span.set_attribute(
-                SpanAttributes.TRACELOOP_ENTITY_INPUT, f"{serialize(args[0])}"
-            )
+            # The serialized request is content: it carries caller-supplied
+            # params, so it is recorded only when content capture is enabled.
+            if should_send_prompts():
+                span.set_attribute(
+                    SpanAttributes.TRACELOOP_ENTITY_INPUT, f"{serialize(args[0])}"
+                )
             return await self._execute_and_handle_result(
                 span, method, args, kwargs, wrapped, clean_output=False
             )
@@ -321,8 +333,11 @@ class McpInstrumentor(BaseInstrumentor):
         """Execute the wrapped function and handle the result"""
         try:
             result = await wrapped(*args, **kwargs)
-            # Add output
-            if clean_output:
+            # Add output. The response body is content, so it is recorded only
+            # when content capture is enabled.
+            if not should_send_prompts():
+                pass
+            elif clean_output:
                 clean_output_data = self._extract_clean_output(method, result)
                 if clean_output_data:
                     try:
@@ -565,9 +580,13 @@ class InstrumentedStreamWriter(ObjectProxy):  # type: ignore
 
         with self._tracer.start_as_current_span("ResponseStreamWriter") as span:
             if hasattr(request, "result"):
-                span.set_attribute(
-                    SpanAttributes.MCP_RESPONSE_VALUE, f"{serialize(request.result)}"
-                )
+                # The response body is content; the error status below is not,
+                # so only the value itself is gated.
+                if should_send_prompts():
+                    span.set_attribute(
+                        SpanAttributes.MCP_RESPONSE_VALUE,
+                        f"{serialize(request.result)}",
+                    )
                 if "isError" in request.result:
                     if request.result["isError"] is True:
                         span.set_status(

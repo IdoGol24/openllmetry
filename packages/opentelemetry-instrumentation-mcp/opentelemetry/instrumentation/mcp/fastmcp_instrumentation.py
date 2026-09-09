@@ -9,7 +9,7 @@ from opentelemetry.semconv_ai import SpanAttributes, TraceloopSpanKindValues
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from wrapt import register_post_import_hook, wrap_function_wrapper
 
-from .utils import dont_throw
+from .utils import dont_throw, should_send_prompts
 
 
 class FastMCPInstrumentor:
@@ -155,9 +155,7 @@ class FastMCPInstrumentor:
 
     def _should_send_prompts(self):
         """Check if content tracing is enabled (matches traceloop SDK)"""
-        return (
-            os.getenv("TRACELOOP_TRACE_CONTENT") or "true"
-        ).lower() == "true"
+        return should_send_prompts()
 
     def _get_json_encoder(self):
         """Get JSON encoder class (simplified - traceloop SDK uses custom JSONEncoder)"""

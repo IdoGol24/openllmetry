@@ -2,11 +2,23 @@
 
 import asyncio
 import logging
+import os
 import traceback
 
 
 class Config:
     exception_logger = None
+
+
+def should_send_prompts() -> bool:
+    """Whether request/response content may be recorded on spans.
+
+    Mirrors the traceloop SDK's ``TRACELOOP_TRACE_CONTENT`` switch: content
+    capture is on unless an operator explicitly turns it off. Shared by the
+    FastMCP server wrapper and the MCP client path so a single environment
+    variable governs both, which is what the package README documents.
+    """
+    return (os.getenv("TRACELOOP_TRACE_CONTENT") or "true").lower() == "true"
 
 
 def dont_throw(func):
