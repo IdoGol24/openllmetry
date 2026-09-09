@@ -187,6 +187,8 @@ def _extract_tool_call_data(
 
 
 class TraceloopCallbackHandler(BaseCallbackHandler):
+    """LangChain callback handler that records chain, tool and LLM runs as spans."""
+
     def __init__(
         self, tracer: Tracer, duration_histogram: Histogram, token_histogram: Histogram
     ) -> None:

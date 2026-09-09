@@ -22,9 +22,11 @@ class _ClientLikeObject:
     """Stands in for a model/client object whose repr renders its config."""
 
     def __init__(self, api_key: str) -> None:
+        """Store the marker the way a real client stores its credential."""
         self.api_key = api_key
 
     def __repr__(self) -> str:
+        """Render the credential, as a real client's repr does."""
         return f"_ClientLikeObject(api_key='{self.api_key}')"
 
 
@@ -50,12 +52,14 @@ def test_object_is_dropped_not_stringified():
 
 
 def test_object_inside_a_list_is_dropped():
+    """A sequence keeps its primitive elements and loses its object elements."""
     value = _sanitize_metadata_value(["ok", _ClientLikeObject(MARKER)])
     assert value == ["ok"]
     assert MARKER not in str(value)
 
 
 def test_plain_dict_is_kept_as_json():
+    """A mapping of plain data stays, encoded as JSON rather than a Python repr."""
     value = _sanitize_metadata_value({"tenant": "acme", "retries": 2})
     assert value == '{"tenant": "acme", "retries": 2}'
 
