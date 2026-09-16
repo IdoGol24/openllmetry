@@ -391,7 +391,7 @@ def _set_chat_metrics(
         _set_choice_counter_metrics(choice_counter, choices, shared_attributes)
 
     # duration metrics
-    if duration and isinstance(duration, (float, int)) and duration_histogram:
+    if isinstance(duration, (float, int)) and duration_histogram:
         duration_histogram.record(duration, attributes=shared_attributes)
 
 
@@ -810,7 +810,7 @@ class ChatStream(ObjectProxy):
             duration = time.time() - self._start_time
         else:
             duration = None
-        if duration and isinstance(duration, (float, int)) and self._duration_histogram:
+        if isinstance(duration, (float, int)) and self._duration_histogram:
             self._duration_histogram.record(
                 duration, attributes=self._shared_attributes()
             )
@@ -966,7 +966,7 @@ def _build_from_streaming_response(
         duration = time.time() - start_time
     else:
         duration = None
-    if duration and isinstance(duration, (float, int)) and duration_histogram:
+    if isinstance(duration, (float, int)) and duration_histogram:
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
         streaming_time_to_generate.record(time.time() - time_of_first_token)
@@ -1037,7 +1037,7 @@ async def _abuild_from_streaming_response(
         duration = time.time() - start_time
     else:
         duration = None
-    if duration and isinstance(duration, (float, int)) and duration_histogram:
+    if isinstance(duration, (float, int)) and duration_histogram:
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
         streaming_time_to_generate.record(time.time() - time_of_first_token)
